@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">AI 雙向自動翻譯系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .visualizer-container { background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #374151; }
+        canvas { width: 100%; height: 40px; }
+        .translation-box { height: 500px; overflow-y: auto; scroll-behavior: smooth; display: flex; flex-direction: column; }
+        .level-meter { height: 6px; background: #1f2937; border-radius: 3px; overflow: hidden; }
+        #levelFill { height: 100%; width: 0%; background: #10b981; transition: width 0.1s; }
+        .log-box { font-family: monospace; font-size: 10px; color: #4b5563; line-height: 1.2; }
+        .bubble { max-width: 85%; padding: 12px 16px; border-radius: 20px; margin-bottom: 12px; position: relative; animation: pop 0.3s ease-out; }
+        @keyframes pop { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .bubble-left { align-self: flex-start; background: #1e293b; border-left: 4px solid #3b82f6; border-bottom-left-radius: 4px; }
+        .bubble-right { align-self: flex-end; background: #064e3b; border-right: 4px solid #10b981; border-bottom-right-radius: 4px; text-align: right; }
+        .lang-tag { font-size: 9px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; opacity: 0.5; color: #94a3b8; }
+        .swap-active { animation: blink 0.5s ease; }
+        @keyframes blink { 0% { background: transparent; } 50% { background: rgba(59, 130, 246, 0.3); } 100% { background: transparent; } }
+        .auto-glow { box-shadow: 0 0 15px rgba(59, 130, 246, 0.5); border-color: #3b82f6 !important; }
+    </style>
+</head>
+<body class="bg-gray-950 text-white p-4 font-sans select-none">
+
+    <div class="max-w-5xl mx-auto space-y-4">
+        <header class="flex justify-between items-center border-b border-gray-800 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-400 flex items-center gap-2">
+                    <span class="bg-blue-600 text-white p-1 rounded">Global+</span> 雙向自動對話
+                </h1>
+                <p class="text-xs text-gray-500 mt-1">
+                    日期：<span id="dateDisplay" class="text-blue-400 font-bold">---</span> | 自動存檔：<span class="text-green-400">開啟 (5min)</span>
+                </p>
+            </div>
+            <div class="flex items-center gap-4 bg-gray-900/50 p-2 rounded-xl border border-gray-800">
+                <div class="text-right">
+                    <p class="text-[9px] text-gray-500 uppercase tracking-tighter">存檔狀態</p>
+                    <p id="saveStatus" class="text-xs font-black text-gray-400">尚未設定目錄</p>
+                </div>
+                <div id="statusDot" class="w-3 h-3 rounded-full bg-gray-600"></div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="md:col-span-1 space-y-4">
+                <div class="bg-gray-900 border border-gray-800 p-4 rounded-2xl shadow-xl space-y-4">
+                    <div class="flex items-center justify-between p-2 bg-blue-900/20 border border-blue-800/50 rounded-lg">
+                        <span class="text-xs font-bold text-blue-300">自動切換模式</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="autoSwitch" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    <div class="p-2 bg-gray-800/50 border border-gray-700 rounded-lg space-y-2">
+                        <span class="text-xs font-bold text-gray-300 block">存檔至桌面</span>
+                        <div class="grid grid-cols-2 gap-1">
+                            <button id="setDirBtn" class="text-[9px] bg-blue-600 py-1 rounded text-white hover:bg-blue-500">1.選擇目錄</button>
+                            <button id="manualSaveBtn" class="text-[9px] bg-green-700 py-1 rounded text-white hover:bg-green-600">2.立即存檔</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-[10px] text-gray-500 font-bold mb-1 block">音訊輸入</label>
+                        <select id="audioSource" class="w-full bg-black border border-gray-700 rounded p-2 text-[11px] text-yellow-500 outline-none"></select>
+                    </div>
+
+                    <div id="langControls" class="space-y-3 p-3 bg-black/40 rounded-xl border border-gray-800 transition-all">
+                        <div>
+                            <label class="text-[10px] text-blue-400 font-bold block mb-1">方向 A (聽取)</label>
+                            <select id="recogLang" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm outline-none">
+                                <option value="en-US" selected>英文 (English)</option>
+                                <option value="zh-TW">中文 (繁體)</option>
+                                <option value="ja-JP">日文 (日本語)</option>
+                                <option value="ko-KR">韓文 (한국어)</option>
+                                <option value="vi-VN">越南文 (Tiếng Việt)</option>
+                                <option value="hi-IN">印度文 (हिन्दी)</option>
+                                <option value="es-ES">西班牙文 (Español)</option>
+                                <option value="fr-FR">法文 (Français)</option>
+                                <option value="th-TH">泰國文 (ไทย)</option>
+                                <option value="it-IT">義大利文 (Italiano)</option>
+                                <option value="pt-PT">葡萄牙文 (Português)</option>
+                                <option value="pl-PL">波蘭文 (Polski)</option>
+                                <option value="de-DE">德文 (Deutsch)</option>
+                            </select>
+                        </div>
+                        <div class="flex justify-center -my-1">
+                            <button id="swapBtn" class="bg-blue-600 hover:bg-blue-500 p-2 rounded-full transition-transform active:rotate-180 shadow-lg z-10">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path></svg>
+                            </button>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-green-400 font-bold block mb-1">方向 B (翻譯)</label>
+                            <select id="targetLang" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm outline-none">
+                                <option value="zh-TW" selected>繁體中文</option>
+                                <option value="en">英文 (English)</option>
+                                <option value="ja">日文 (Japanese)</option>
+                                <option value="ko">韓文 (Korean)</option>
+                                <option value="vi">越南文 (Vietnamese)</option>
+                                <option value="hi">印度文 (Hindi)</option>
+                                <option value="es">西班牙文 (Spanish)</option>
+                                <option value="fr">法文 (French)</option>
+                                <option value="th">泰國文 (Thai)</option>
+                                <option value="it">義大利文 (Italian)</option>
+                                <option value="pt">葡萄牙文 (Portuguese)</option>
+                                <option value="pl">波蘭文 (Polish)</option>
+                                <option value="de">德文 (German)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="startBtn" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-sm transition-all shadow-lg active:scale-95">啟動系統</button>
+                        <button id="stopBtn" disabled class="bg-gray-800 hover:bg-red-600 py-3 rounded-xl font-bold text-sm transition-all">停止</button>
+                    </div>
+
+                    <div class="pt-1">
+                        <div class="flex justify-between text-[9px] font-bold text-gray-600 mb-1">INPUT LEVEL <span id="volNum">0%</span></div>
+                        <div class="level-meter"><div id="levelFill"></div></div>
+                    </div>
+                </div>
+                <div class="visualizer-container"><canvas id="visualizer"></canvas></div>
+                <button id="clearBtn" class="w-full py-2 border border-gray-800 text-gray-500 hover:text-red-400 hover:border-red-900 rounded-xl text-xs transition-all italic">清除所有對話紀錄</button>
+            </div>
+
+            <div class="md:col-span-3 flex flex-col space-y-4">
+                <div class="bg-gray-900 border border-gray-800 rounded-2xl flex flex-col shadow-2xl flex-grow overflow-hidden">
+                    <div id="output" class="translation-box p-6 space-y-2 bg-[#020617] scrollbar-hide">
+                        <div id="emptyMsg" class="h-full flex flex-col items-center justify-center text-gray-700 text-center">
+                            <p class="text-lg font-medium opacity-20">等待偵測開始...</p>
+                        </div>
+                    </div>
+                    <div class="bg-black/80 p-4 border-t border-gray-800">
+                        <div class="flex items-center space-x-3 max-w-2xl mx-auto">
+                            <div id="dirTag" class="shrink-0 bg-blue-600 text-white text-[10px] px-2 py-1 rounded-md font-bold transition-all">A → B</div>
+                            <div id="interim" class="text-blue-200/70 font-medium text-lg italic truncate">準備聽取中...</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="sysLog" class="log-box bg-black/50 p-2 rounded-lg border border-gray-900 h-12 overflow-y-auto">系統就緒。請先選擇資料夾。</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const todayStr = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+        document.title = todayStr;
+        document.getElementById('dateDisplay').innerText = todayStr;
+
+        let audioContext, analyser, recognition, animId, persistentStream;
+        let lastResultTime = Date.now();
+        let isRunning = false;
+        let isSwapped = false;
+        let isProcessing = false;
+        let directoryHandle = null;
+
+        const el = {
+            startBtn: document.getElementById('startBtn'),
+            stopBtn: document.getElementById('stopBtn'),
+            swapBtn: document.getElementById('swapBtn'),
+            autoSwitch: document.getElementById('autoSwitch'),
+            clearBtn: document.getElementById('clearBtn'),
+            setDirBtn: document.getElementById('setDirBtn'),
+            manualSaveBtn: document.getElementById('manualSaveBtn'),
+            saveStatus: document.getElementById('saveStatus'),
+            audioSelect: document.getElementById('audioSource'),
+            levelFill: document.getElementById('levelFill'),
+            volNum: document.getElementById('volNum'),
+            output: document.getElementById('output'),
+            interim: document.getElementById('interim'),
+            sysLog: document.getElementById('sysLog'),
+            recogLang: document.getElementById('recogLang'),
+            targetLang: document.getElementById('targetLang'),
+            statusDot: document.getElementById('statusDot'),
+            dirTag: document.getElementById('dirTag'),
+            langControls: document.getElementById('langControls')
+        };
+
+        function log(msg) {
+            const div = document.createElement('div');
+            div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.sysLog.prepend(div);
+        }
+
+        // 核心存檔函數
+        async function performAutoSave(isManual = false) {
+            try {
+                if (!directoryHandle) {
+                    if(isManual) alert("請先選擇存檔目錄！");
+                    return;
+                }
+
+                // 檢查權限 (解決瀏覽器二次確認問題)
+                const opts = { mode: 'readwrite' };
+                if ((await directoryHandle.queryPermission(opts)) !== 'granted') {
+                    if ((await directoryHandle.requestPermission(opts)) !== 'granted') {
+                        log("⚠️ 權限被拒絕：請在網址列下方點擊『允許』存取檔案。");
+                        return;
+                    }
+                }
+
+                const bubbles = Array.from(el.output.querySelectorAll('.bubble'));
+                if (bubbles.length === 0) {
+                    if(isManual) log("目前沒有內容可存檔。");
+                    return;
+                }
+
+                log(isManual ? "正在手動存檔..." : "正在自動定期存檔...");
+                
+                let content = `--- 翻譯紀錄 ---\n日期: ${todayStr}\n生成時間: ${new Date().toLocaleString()}\n\n`;
+                bubbles.forEach(b => {
+                    const tag = b.querySelector('.lang-tag').innerText;
+                    const original = b.querySelector('.italic').innerText;
+                    const trans = b.querySelector('.font-bold').innerText;
+                    const time = b.querySelector('.opacity-20') ? b.querySelector('.opacity-20').innerText : '';
+                    content += `[${time}] ${tag}\n原文: ${original}\n翻譯: ${trans}\n-------------------\n`;
+                });
+
+                const now = new Date();
+                const timeStr = `${now.getHours().toString().padStart(2,'0')}-${now.getMinutes().toString().padStart(2,'0')}-${now.getSeconds().toString().padStart(2,'0')}`;
+                const fileName = `Translation_${timeStr}.txt`;
+                
+                const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(content);
+                await writable.close();
+                log(`✅ 成功存入檔案：${fileName}`);
+            } catch (err) { 
+                log(`❌ 存檔失敗: ${err.message}`);
+                console.error(err);
+            }
+        }
+
+        // 每 5 分鐘執行一次
+        setInterval(() => { if(isRunning) performAutoSave(); }, 300000);
+        el.manualSaveBtn.onclick = () => performAutoSave(true);
+
+        el.setDirBtn.onclick = async () => {
+            try {
+                directoryHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                el.saveStatus.innerText = "已設定目錄";
+                el.saveStatus.classList.replace('text-gray-400', 'text-green-400');
+                log("📁 已獲取目錄授權。");
+            } catch (e) { log("🚫 目錄選擇已取消。"); }
+        };
+
+        async function initDevices() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const inputs = devices.filter(d => d.kind === 'audioinput');
+                el.audioSelect.innerHTML = inputs.map(d => `<option value="${d.deviceId}">${d.label || '裝置'}</option>`).join('');
+                stream.getTracks().forEach(t => t.stop());
+            } catch (e) { log("麥克風初始化失敗。"); }
+        }
+
+        function swapLanguages(manual = true) {
+            if (isProcessing && !manual) return;
+            const oldRecog = el.recogLang.value;
+            const oldTarget = el.targetLang.value;
+            const R2T = { 'en-US': 'en', 'zh-TW': 'zh-TW', 'ja-JP': 'ja', 'ko-KR': 'ko', 'vi-VN': 'vi', 'hi-IN': 'hi', 'es-ES': 'es', 'fr-FR': 'fr', 'th-TH': 'th', 'it-IT': 'it', 'pt-PT': 'pt', 'pl-PL': 'pl', 'de-DE': 'de' };
+            const T2R = { 'en': 'en-US', 'zh-TW': 'zh-TW', 'ja': 'ja-JP', 'ko': 'ko-KR', 'vi': 'vi-VN', 'hi': 'hi-IN', 'es': 'es-ES', 'fr': 'fr-FR', 'th': 'th-TH', 'it': 'it-IT', 'pt': 'pt-PT', 'pl': 'pl-PL', 'de': 'de-DE' };
+            el.recogLang.value = T2R[oldTarget] || 'en-US';
+            el.targetLang.value = R2T[oldRecog] || 'zh-TW';
+            isSwapped = !isSwapped;
+            el.dirTag.innerText = isSwapped ? "B → A" : "A → B";
+            el.dirTag.className = `shrink-0 ${isSwapped ? 'bg-green-600' : 'bg-blue-600'} text-white text-[10px] px-2 py-1 rounded-md font-bold transition-all`;
+            el.langControls.classList.add('swap-active');
+            setTimeout(() => el.langControls.classList.remove('swap-active'), 500);
+            if (isRunning) { if (recognition) try { recognition.stop(); } catch(e){} setTimeout(startRecognition, 300); }
+        }
+
+        el.swapBtn.onclick = (e) => { e.preventDefault(); swapLanguages(true); };
+        window.addEventListener('keydown', (e) => { if (e.code === "Space" && document.activeElement.tagName !== 'SELECT' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); swapLanguages(true); } });
+
+        async function translateText(text, tl) {
+            try {
+                const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURI(text)}`;
+                const response = await fetch(url);
+                const result = await response.json();
+                return result[0].map(x => x[0]).join('');
+            } catch (e) { return text + " (翻譯失敗)"; }
+        }
+
+        async function addCard(text) {
+            if (!text || text.trim() === "" || isProcessing) return;
+            isProcessing = true;
+            el.interim.innerText = "正在翻譯...";
+            const translatedText = await translateText(text, el.targetLang.value);
+            el.interim.innerText = "聽取中...";
+            const empty = document.getElementById('emptyMsg');
+            if (empty) empty.remove();
+            const bubble = document.createElement('div');
+            bubble.className = `bubble ${isSwapped ? 'bubble-right' : 'bubble-left'}`;
+            bubble.innerHTML = `<div class="lang-tag">${el.recogLang.selectedOptions[0].text}</div><p class="text-xs text-gray-400 italic mb-1">${text}</p><p class="text-white text-base font-bold leading-tight">${translatedText}</p><div class="text-[8px] opacity-20 mt-1">${new Date().toLocaleTimeString()}</div>`;
+            el.output.appendChild(bubble);
+            el.output.scrollTop = el.output.scrollHeight;
+            isProcessing = false;
+            if (el.autoSwitch.checked) setTimeout(() => swapLanguages(false), 1200);
+        }
+
+        function startRecognition() {
+            if (!isRunning) return;
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (recognition) { recognition.onend = null; try { recognition.stop(); } catch(e){} }
+            recognition = new SpeechRec();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = el.recogLang.value;
+            recognition.onstart = () => { lastResultTime = Date.now(); el.interim.innerText = "聽取中..."; };
+            recognition.onresult = (e) => {
+                lastResultTime = Date.now();
+                let currentText = '';
+                for (let i = e.resultIndex; i < e.results.length; ++i) {
+                    if (e.results[i].isFinal) addCard(e.results[i][0].transcript);
+                    else currentText += e.results[i][0].transcript;
+                }
+                if (currentText) el.interim.innerText = currentText;
+            };
+            recognition.onend = () => { if (isRunning && !isProcessing) setTimeout(startRecognition, 500); };
+            try { recognition.start(); } catch(e){}
+        }
+
+        async function toggleStart() {
+            if (!directoryHandle) { alert("請先點擊『選擇目錄』"); return; }
+            if (isRunning) return;
+            try {
+                persistentStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: el.audioSelect.value ? { exact: el.audioSelect.value } : undefined } });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state === 'suspended') await audioContext.resume();
+                analyser = audioContext.createAnalyser();
+                audioContext.createMediaStreamSource(persistentStream).connect(analyser);
+                isRunning = true;
+                el.startBtn.disabled = true; el.stopBtn.disabled = false;
+                el.statusDot.classList.replace('bg-gray-600', 'bg-blue-500');
+                el.statusDot.classList.add('animate-pulse', 'shadow-[0_0_10px_#3b82f6]');
+                startRecognition(); monitor(); draw();
+                log("系統已啟動。預計 5 分鐘後自動存檔。");
+            } catch (e) { log("啟動失敗: " + e.message); }
+        }
+
+        function stopSystem() {
+            isRunning = false;
+            el.startBtn.disabled = false;
+            el.stopBtn.disabled = true;
+            el.statusDot.classList.replace('bg-blue-500', 'bg-gray-600');
+            el.statusDot.classList.remove('animate-pulse', 'shadow-[0_0_10px_#3b82f6]');
+            performAutoSave(); // 停止時存檔
+            if(recognition) { recognition.onend = null; try { recognition.stop(); } catch(e){} }
+            if(audioContext) { audioContext.close(); audioContext = null; }
+            if(persistentStream) { persistentStream.getTracks().forEach(t => t.stop()); persistentStream = null; }
+            log("系統已停止。");
+        }
+
+        function monitor() {
+            const data = new Uint8Array(analyser.fftSize);
+            const check = () => {
+                if (!isRunning) return;
+                analyser.getByteTimeDomainData(data);
+                let sum = 0; for(let i=0; i<data.length; i++){ let v = (data[i]-128)/128; sum += v*v; }
+                let vol = Math.min(100, Math.floor(Math.sqrt(sum/data.length)*500));
+                el.levelFill.style.width = vol + "%"; el.volNum.innerText = vol + "%";
+                const now = Date.now();
+                if (el.autoSwitch.checked && !isProcessing && (now - lastResultTime > 8000) && el.interim.innerText === "聽取中...") {
+                    swapLanguages(false);
+                }
+                requestAnimationFrame(check);
+            };
+            check();
+        }
+
+        function draw() {
+            const canvas = document.getElementById('visualizer');
+            const ctx = canvas.getContext('2d');
+            const render = () => {
+                if (!isRunning) return;
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(data);
+                ctx.clearRect(0,0,canvas.width, canvas.height);
+                ctx.fillStyle = isSwapped ? `rgba(16, 185, 129, 0.4)` : `rgba(59, 130, 246, 0.4)`;
+                for(let i=0; i<data.length; i+=15) { const h = (data[i]/255) * canvas.height; ctx.fillRect(i * 1.5, canvas.height - h, 3, h); }
+                requestAnimationFrame(render);
+            };
+            render();
+        }
+
+        initDevices();
+        el.startBtn.onclick = toggleStart;
+        el.stopBtn.onclick = stopSystem;
+        el.autoSwitch.onchange = () => { el.langControls.classList.toggle('auto-glow', el.autoSwitch.checked); };
+        el.clearBtn.onclick = () => { if(confirm("確定清除紀錄？")) el.output.innerHTML = ''; };
+    </script>
+</body>
+</html>
